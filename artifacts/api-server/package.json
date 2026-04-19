@@ -10,8 +10,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@sapiom/axios": "^0.5.0",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
+    "axios": "^1.15.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2",
     "drizzle-orm": "catalog:",
