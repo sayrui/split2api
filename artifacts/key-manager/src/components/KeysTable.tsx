@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Copy, Trash2, Edit2, Eye, EyeOff, KeyRound } from "lucide-react";
+import { Copy, Trash2, Edit2, Eye, EyeOff, KeyRound, Zap, CheckCircle2, XCircle, AlertCircle, Loader2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -19,8 +19,73 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EditKeyDialog } from "./EditKeyDialog";
 import { Empty } from "@/components/ui/empty";
+
+type ValidateStatus = "valid" | "no_balance" | "invalid" | "unreachable";
+type ValidateResult = { status: ValidateStatus; message: string; httpStatus: number };
+
+async function validateKey(id: number, baseUrl: string): Promise<ValidateResult> {
+  const resp = await fetch(`${baseUrl}keys/${id}/validate`, { method: "POST" });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+const BASE_URL = import.meta.env.BASE_URL?.replace(/\/$/, "") + "/api/";
+
+function ValidateBadge({ result }: { result: ValidateResult }) {
+  if (result.status === "valid") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Valid
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{result.message}</TooltipContent>
+      </Tooltip>
+    );
+  }
+  if (result.status === "no_balance") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-yellow-600">
+            <AlertCircle className="h-3.5 w-3.5" />
+            No Balance
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{result.message}</TooltipContent>
+      </Tooltip>
+    );
+  }
+  if (result.status === "unreachable") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground">
+            <AlertCircle className="h-3.5 w-3.5" />
+            Offline
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{result.message}</TooltipContent>
+      </Tooltip>
+    );
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-destructive">
+          <XCircle className="h-3.5 w-3.5" />
+          Invalid
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{result.message}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export function KeysTable() {
   const { data: keys, isLoading } = useListKeys();
@@ -32,6 +97,8 @@ export function KeysTable() {
   const [visibleKeys, setVisibleKeys] = useState<Set<number>>(new Set());
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [editingKey, setEditingKey] = useState<ApiKey | null>(null);
+  const [validating, setValidating] = useState<Set<number>>(new Set());
+  const [validateResults, setValidateResults] = useState<Map<number, ValidateResult>>(new Map());
 
   const toggleVisibility = (id: number) => {
     setVisibleKeys((prev) => {
@@ -51,6 +118,37 @@ export function KeysTable() {
       title: "Copied to clipboard",
       description: "The API key has been copied.",
     });
+  };
+
+  const handleValidate = async (key: ApiKey) => {
+    setValidating((prev) => new Set(prev).add(key.id));
+    try {
+      const result = await validateKey(key.id, BASE_URL);
+      setValidateResults((prev) => new Map(prev).set(key.id, result));
+      const statusLabel: Record<ValidateStatus, string> = {
+        valid: "Key is valid",
+        no_balance: "Key valid but no balance",
+        invalid: "Key is invalid",
+        unreachable: "API unreachable",
+      };
+      toast({
+        title: statusLabel[result.status],
+        description: result.message,
+        variant: result.status === "valid" || result.status === "no_balance" ? "default" : "destructive",
+      });
+    } catch (e) {
+      toast({
+        title: "Validation failed",
+        description: String(e),
+        variant: "destructive",
+      });
+    } finally {
+      setValidating((prev) => {
+        const next = new Set(prev);
+        next.delete(key.id);
+        return next;
+      });
+    }
   };
 
   const handleToggleActive = (key: ApiKey, isActive: boolean) => {
@@ -133,14 +231,16 @@ export function KeysTable() {
             <TableHead>Key</TableHead>
             <TableHead>Provider</TableHead>
             <TableHead>Created</TableHead>
-            <TableHead className="w-[100px]">Status</TableHead>
-            <TableHead className="text-right w-[150px]">Actions</TableHead>
+            <TableHead className="w-[110px]">Status</TableHead>
+            <TableHead className="text-right w-[160px]">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {keys.map((key) => {
             const isVisible = visibleKeys.has(key.id);
             const maskedKey = key.key.substring(0, 6) + "****************";
+            const validateResult = validateResults.get(key.id);
+            const isValidating = validating.has(key.id);
             
             return (
               <TableRow key={key.id} className="group">
@@ -151,6 +251,11 @@ export function KeysTable() {
                       <span className="text-xs text-muted-foreground truncate max-w-[180px]" title={key.note}>
                         {key.note}
                       </span>
+                    )}
+                    {validateResult && (
+                      <div className="mt-0.5">
+                        <ValidateBadge result={validateResult} />
+                      </div>
                     )}
                   </div>
                 </TableCell>
@@ -200,6 +305,23 @@ export function KeysTable() {
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-1">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-yellow-500"
+                          onClick={() => handleValidate(key)}
+                          disabled={isValidating}
+                          data-testid={`button-validate-${key.id}`}
+                        >
+                          {isValidating
+                            ? <Loader2 className="h-4 w-4 animate-spin" />
+                            : <Zap className="h-4 w-4" />}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Test key against Sapiom API</TooltipContent>
+                    </Tooltip>
                     <Button
                       variant="ghost"
                       size="icon"

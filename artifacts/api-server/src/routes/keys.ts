@@ -184,6 +184,74 @@ router.patch("/keys/:id", async (req, res) => {
   }
 });
 
+router.post("/keys/:id/validate", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid id" });
+      return;
+    }
+    const [keyRow] = await db.select().from(apiKeysTable).where(eq(apiKeysTable.id, id));
+    if (!keyRow) {
+      res.status(404).json({ error: "Key not found" });
+      return;
+    }
+
+    // Test 1: api.sapiom.ai authentication (used by SDK for transaction creation)
+    const authResp = await fetch("https://api.sapiom.ai/v1/transactions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": keyRow.key,
+      },
+      body: JSON.stringify({ metadata: { test: true } }),
+      signal: AbortSignal.timeout(8000),
+    }).catch((e) => ({ status: 0, _err: e.message }));
+
+    const apiStatus = "status" in authResp ? (authResp as Response).status : 0;
+    let apiBody = "";
+    if ("json" in authResp) {
+      try {
+        const j = await (authResp as Response).json();
+        apiBody = j.message || j.error || JSON.stringify(j).slice(0, 100);
+      } catch {}
+    }
+
+    // 201 = transaction created (valid key with balance)
+    // 422/400 = valid key but bad payload
+    // 403 = invalid key
+    // 402 = valid key but no balance
+    const valid = apiStatus === 201 || apiStatus === 400 || apiStatus === 422;
+    const noBalance = apiStatus === 402;
+    const invalidKey = apiStatus === 403 || apiStatus === 401;
+
+    let status: "valid" | "no_balance" | "invalid" | "unreachable";
+    let message: string;
+
+    if (valid) {
+      status = "valid";
+      message = "Key authenticated successfully with Sapiom API";
+    } else if (noBalance) {
+      status = "no_balance";
+      message = "Key is valid but account has insufficient balance";
+    } else if (invalidKey) {
+      status = "invalid";
+      message = `Key rejected by Sapiom API: ${apiBody}`;
+    } else if (apiStatus === 0) {
+      status = "unreachable";
+      message = "Could not reach Sapiom API";
+    } else {
+      status = "invalid";
+      message = `Unexpected response ${apiStatus}: ${apiBody}`;
+    }
+
+    res.json({ id, status, message, httpStatus: apiStatus });
+  } catch (e) {
+    req.log.error(e);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 router.delete("/keys/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
