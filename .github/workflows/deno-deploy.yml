@@ -1,0 +1,57 @@
+name: Deploy to Deno Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build key-manager frontend
+        run: pnpm --filter @workspace/key-manager run build
+        env:
+          PORT: "8000"
+          BASE_PATH: "/"
+          NODE_ENV: production
+          VITE_APP_PASSWORD: ${{ secrets.VITE_APP_PASSWORD }}
+
+      - name: Copy frontend build to dist/
+        run: cp -r artifacts/key-manager/dist/public ./dist
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Deploy to Deno Deploy
+        uses: denoland/deployctl@v1
+        with:
+          project: sapiom2api
+          entrypoint: main.ts
+          include: |
+            main.ts
+            deno.json
+            dist

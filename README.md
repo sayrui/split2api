@@ -2,8 +2,6 @@
 
 An OpenAI-compatible reverse proxy for [Sapiom](https://sapiom.ai)'s OpenRouter service (`https://openrouter.services.sapiom.ai`). Manages a pool of `sk_live_*` API keys, rotates them automatically, validates their health, and provides a password-protected web UI for key management.
 
-[![Deploy on Deno](https://deno.com/button)](https://console.deno.com/new?clone=https://github.com/sayrui/split2api)
-
 ## Features
 
 - **OpenAI-compatible API** — drop-in replacement for any OpenAI SDK or tool
@@ -165,9 +163,56 @@ POST /api/keys/validate-all
 
 ## Deployment
 
-Deploy on Replit — the project is configured for zero-config hosting. Click **Deploy** in the Replit UI.
+### Deploy on Deno Deploy
 
-In production, set all required environment variables (especially `VITE_APP_PASSWORD` and `DATABASE_URL`).
+[![Deploy on Deno](https://deno.com/button)](https://console.deno.com/new?clone=https://github.com/sayrui/split2api)
+
+The project is fully adapted for Deno Deploy. It uses:
+
+- **[Hono](https://hono.dev)** — lightweight web framework that runs natively on Deno
+- **[drizzle-orm + postgres.js](https://orm.drizzle.team)** — Deno-compatible ORM  
+- **GitHub Actions** — builds the React frontend before each deploy
+
+#### Setup Steps
+
+1. **Create a Deno Deploy project** at [dash.deno.com](https://dash.deno.com) → New Project → select your GitHub repo (`sayrui/split2api`)
+
+2. **Choose "GitHub Actions" mode** (required — the project needs a build step for the frontend)
+
+3. **Set the following Secrets** in your GitHub repo (`Settings → Secrets and variables → Actions`):
+
+   | Secret | Description |
+   |--------|-------------|
+   | `DATABASE_URL` | PostgreSQL connection string (e.g. [Neon](https://neon.tech) or [Supabase](https://supabase.com)) |
+   | `VITE_APP_PASSWORD` | Password for the Key Manager web UI |
+   | `DENO_DEPLOY_TOKEN` | Token from Deno Deploy project settings |
+
+4. **Push to `main`** — GitHub Actions will automatically build the frontend and deploy
+
+#### Run the DB migration
+
+After the first deploy, run `drizzle-kit push` against your PostgreSQL instance to create the schema:
+
+```bash
+DATABASE_URL=your-db-url npx drizzle-kit push --config lib/db/drizzle.config.ts
+```
+
+#### How it works
+
+```
+GitHub push → GitHub Actions
+  1. pnpm install
+  2. vite build (key-manager frontend → ./dist/)
+  3. deno deploy (main.ts + dist/ → Deno Deploy)
+```
+
+The single `main.ts` entry point serves both:
+- **`/api/*`** and **`/v1/*`** — API and OpenAI-compatible proxy
+- **`/*`** — Pre-built React frontend (SPA with fallback to `index.html`)
+
+### Deploy on Replit (alternative)
+
+The project also runs on Replit with zero additional config. Click **Deploy** in the Replit UI.
 
 ## License
 
